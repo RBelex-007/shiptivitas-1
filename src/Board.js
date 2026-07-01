@@ -10,15 +10,99 @@ export default class Board extends React.Component {
     const clients = this.getClients();
     this.state = {
       clients: {
-        backlog: clients.filter(client => !client.status || client.status === 'backlog'),
-        inProgress: clients.filter(client => client.status && client.status === 'in-progress'),
-        complete: clients.filter(client => client.status && client.status === 'complete'),
+        backlog: clients.map(client => ({ ...client, status: 'backlog' })),
+        inProgress: [],
+        complete: [],
       }
     }
     this.swimlanes = {
       backlog: React.createRef(),
       inProgress: React.createRef(),
       complete: React.createRef(),
+    }
+  }
+
+  componentDidMount() {
+    const containers = [
+      this.swimlanes.backlog.current,
+      this.swimlanes.inProgress.current,
+      this.swimlanes.complete.current,
+    ];
+    this.drake = Dragula(containers);
+
+    this.drake.on('drop', (el, target, source, sibling) => {
+      // Revert the DOM change made by Dragula so React can handle the state and update the DOM itself.
+      this.drake.cancel(true);
+
+      // Find the ID of the dragged client
+      const clientId = el.getAttribute('data-id');
+
+      // Map container refs to their respective swimlane names
+      let targetSwimlane = null;
+      if (target === this.swimlanes.backlog.current) {
+        targetSwimlane = 'backlog';
+      } else if (target === this.swimlanes.inProgress.current) {
+        targetSwimlane = 'inProgress';
+      } else if (target === this.swimlanes.complete.current) {
+        targetSwimlane = 'complete';
+      }
+
+      let sourceSwimlane = null;
+      if (source === this.swimlanes.backlog.current) {
+        sourceSwimlane = 'backlog';
+      } else if (source === this.swimlanes.inProgress.current) {
+        sourceSwimlane = 'inProgress';
+      } else if (source === this.swimlanes.complete.current) {
+        sourceSwimlane = 'complete';
+      }
+
+      // If dropped outside of our lanes or if some reference is lost, do nothing.
+      if (!targetSwimlane || !sourceSwimlane) {
+        return;
+      }
+
+      // Find the client object that was dragged
+      const sourceClients = [...this.state.clients[sourceSwimlane]];
+      const targetClients = sourceSwimlane === targetSwimlane ? sourceClients : [...this.state.clients[targetSwimlane]];
+
+      const clientIndex = sourceClients.findIndex(c => c.id === clientId);
+      if (clientIndex === -1) return;
+
+      const [client] = sourceClients.splice(clientIndex, 1);
+
+      // Update client status based on the target swimlane
+      const updatedClient = {
+        ...client,
+        status: targetSwimlane === 'inProgress' ? 'in-progress' : targetSwimlane,
+      };
+
+      // Determine the drop index in the target swimlane
+      let dropIndex = targetClients.length;
+      if (sibling) {
+        const siblingId = sibling.getAttribute('data-id');
+        dropIndex = targetClients.findIndex(c => c.id === siblingId);
+        if (dropIndex === -1) {
+          dropIndex = targetClients.length;
+        }
+      }
+
+      // Insert the client at the drop index
+      targetClients.splice(dropIndex, 0, updatedClient);
+
+      // Update state
+      this.setState({
+        clients: {
+          ...this.state.clients,
+          [sourceSwimlane]: sourceClients,
+          [targetSwimlane]: targetClients,
+        }
+      });
+    });
+  }
+
+  componentWillUnmount() {
+    if (this.drake) {
+      this.drake.destroy();
     }
   }
   getClients() {
